@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Controle Financeiro</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/app financeiro (1).png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-1" aria-hidden="true"></div>
+    <div class="bg-shape bg-shape-2" aria-hidden="true"></div>
+
+    <main class="app-container">
+      <header class="topbar">
+        <h1>Controle Financeiro</h1>
+        <button id="installBtn" class="btn ghost hidden" type="button">Instalar app</button>
+      </header>
+
+      <section id="authSection" class="card auth-card">
+        <div class="auth-tabs">
+          <button id="showLoginBtn" class="tab active" type="button">Entrar</button>
+          <button id="showRegisterBtn" class="tab" type="button">Cadastrar</button>
+        </div>
+
+        <form id="loginForm" class="auth-form" autocomplete="on">
+          <label>
+            Email
+            <input id="loginEmail" type="email" required placeholder="voce@email.com" />
+          </label>
+          <label>
+            Senha
+            <input id="loginSenha" type="password" required minlength="6" />
+          </label>
+          <button class="btn primary" type="submit">Entrar</button>
+        </form>
+
+        <form id="registerForm" class="auth-form hidden" autocomplete="on">
+          <label>
+            Nome
+            <input id="registerNome" type="text" required minlength="2" />
+          </label>
+          <label>
+            Email
+            <input id="registerEmail" type="email" required />
+          </label>
+          <label>
+            Senha
+            <input id="registerSenha" type="password" required minlength="6" />
+          </label>
+          <button class="btn primary" type="submit">Criar conta</button>
+        </form>
+      </section>
+
+      <section id="appSection" class="hidden">
+        <div class="card user-header">
+          <div>
+            <p class="muted">Usuario conectado</p>
+            <h2 id="userName">-</h2>
+          </div>
+          <button id="logoutBtn" class="btn danger" type="button">Sair</button>
+        </div>
+
+        <div class="quick-nav">
+          <button class="chip active" data-view="dashboard" type="button">Dashboard</button>
+          <button class="chip" data-view="nova" type="button">Nova</button>
+          <button class="chip" data-view="historico" type="button">Historico</button>
+          <button class="chip" data-view="meta" type="button">Meta</button>
+        </div>
+
+        <section id="view-dashboard" class="view card">
+          <h3>Resumo geral</h3>
+          <div class="stats-grid">
+            <article class="stat">
+              <p>Saldo atual</p>
+              <strong id="saldoAtual">R$ 0,00</strong>
+            </article>
+            <article class="stat">
+              <p>Receitas</p>
+              <strong id="totalReceitas">R$ 0,00</strong>
+            </article>
+            <article class="stat">
+              <p>Despesas</p>
+              <strong id="totalDespesas">R$ 0,00</strong>
+            </article>
+            <article class="stat">
+              <p>Registros</p>
+              <strong id="qtdRegistros">0</strong>
+            </article>
+          </div>
+        </section>
+
+        <section id="view-nova" class="view card hidden">
+          <h3>Nova movimentacao</h3>
+          <form id="movForm" class="grid-form">
+            <label>
+              Tipo
+              <select id="movTipo" required>
+                <option value="">Selecione</option>
+                <option value="receita">Receita</option>
+                <option value="despesa">Despesa</option>
+              </select>
+            </label>
+            <label>
+              Categoria
+              <input id="movCategoria" type="text" required maxlength="40" placeholder="Ex: Alimentacao" />
+            </label>
+            <label class="full-width">
+              Descricao
+              <input id="movDescricao" type="text" required maxlength="80" placeholder="Ex: Mercado da semana" />
+            </label>
+            <label>
+              Valor
+              <input id="movValor" type="number" required min="0.01" step="0.01" />
+            </label>
+            <button class="btn primary" id="movSubmitBtn" type="submit">Salvar movimentacao</button>
+            <button class="btn ghost hidden" id="cancelEditBtn" type="button">Cancelar edicao</button>
+          </form>
+        </section>
+
+        <section id="view-historico" class="view card hidden">
+          <h3>Historico</h3>
+          <div class="filters">
+            <label>
+              Tipo
+              <select id="filtroTipo">
+                <option value="">Todos</option>
+                <option value="receita">Receita</option>
+                <option value="despesa">Despesa</option>
+              </select>
+            </label>
+            <label>
+              Categoria
+              <input id="filtroCategoria" type="text" placeholder="Filtrar categoria" />
+            </label>
+            <label>
+              Mes
+              <input id="filtroMes" type="month" />
+            </label>
+          </div>
+          <ul id="historicoLista" class="mov-list"></ul>
+        </section>
+
+        <section id="view-meta" class="view card hidden">
+          <h3>Meta mensal</h3>
+          <form id="metaForm" class="grid-form">
+            <label>
+              Mes referencia
+              <input id="metaMes" type="month" required />
+            </label>
+            <label>
+              Valor da meta (despesas maximas)
+              <input id="metaValor" type="number" min="0.01" step="0.01" required />
+            </label>
+            <button class="btn primary" type="submit">Salvar meta</button>
+          </form>
+          <div class="meta-panel">
+            <p id="metaStatus">Sem meta definida para o mes.</p>
+            <div class="progress-wrap" aria-hidden="true">
+              <div id="metaProgress" class="progress-bar"></div>
+            </div>
+            <p id="metaResumo" class="muted">Defina uma meta para acompanhar seu progresso.</p>
+          </div>
+          <div class="chart-wrap">
+            <h4>Evolucao mensal</h4>
+            <canvas id="evolucaoChart" height="180"></canvas>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+    <script src="vendor/chart.umd.min.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
