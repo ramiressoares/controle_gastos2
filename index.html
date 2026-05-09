@@ -64,10 +64,22 @@
         </div>
 
         <div class="quick-nav">
-          <button class="chip active" data-view="dashboard" type="button">Dashboard</button>
-          <button class="chip" data-view="nova" type="button">Nova</button>
-          <button class="chip" data-view="historico" type="button">Historico</button>
-          <button class="chip" data-view="meta" type="button">Meta</button>
+          <button class="chip active" data-view="dashboard" type="button" aria-label="Dashboard">
+            <span class="chip-icon" aria-hidden="true">📊</span>
+            <span>Dashboard</span>
+          </button>
+          <button class="chip" data-view="nova" type="button" aria-label="Nova movimentacao">
+            <span class="chip-icon" aria-hidden="true">➕</span>
+            <span>Nova</span>
+          </button>
+          <button class="chip" data-view="historico" type="button" aria-label="Historico">
+            <span class="chip-icon" aria-hidden="true">🧾</span>
+            <span>Historico</span>
+          </button>
+          <button class="chip" data-view="meta" type="button" aria-label="Meta mensal">
+            <span class="chip-icon" aria-hidden="true">🎯</span>
+            <span>Meta</span>
+          </button>
         </div>
 
         <section id="view-dashboard" class="view card">
@@ -139,6 +151,10 @@
               Mes
               <input id="filtroMes" type="month" />
             </label>
+          </div>
+          <div class="report-actions">
+            <button id="imprimirRelatorioBtn" class="btn ghost" type="button">Imprimir relatorio mensal</button>
+            <button id="baixarPdfBtn" class="btn primary" type="button">Baixar PDF mensal</button>
           </div>
           <ul id="historicoLista" class="mov-list"></ul>
         </section>

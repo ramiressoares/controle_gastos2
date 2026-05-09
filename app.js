@@ -22,6 +22,8 @@ const state = {
   deferredPrompt: null,
 };
 
+let jsPdfLoadPromise = null;
+
 const els = {
   authSection: document.getElementById("authSection"),
   appSection: document.getElementById("appSection"),
@@ -46,6 +48,8 @@ const els = {
   filtroTipo: document.getElementById("filtroTipo"),
   filtroCategoria: document.getElementById("filtroCategoria"),
   filtroMes: document.getElementById("filtroMes"),
+  imprimirRelatorioBtn: document.getElementById("imprimirRelatorioBtn"),
+  baixarPdfBtn: document.getElementById("baixarPdfBtn"),
   metaForm: document.getElementById("metaForm"),
   metaMes: document.getElementById("metaMes"),
   metaValor: document.getElementById("metaValor"),
@@ -74,6 +78,211 @@ function mesAtualISO() {
   const hoje = new Date();
   const mes = String(hoje.getMonth() + 1).padStart(2, "0");
   return `${hoje.getFullYear()}-${mes}`;
+}
+
+function formatarMesReferencia(mesISO) {
+  if (!/^\d{4}-\d{2}$/.test(mesISO || "")) return mesISO || "-";
+  const [ano, mes] = mesISO.split("-").map(Number);
+  return new Date(ano, mes - 1, 1).toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function obterMesRelatorio() {
+  return els.filtroMes.value || mesAtualISO();
+}
+
+function construirDadosRelatorioMensal(mes) {
+  const movimentacoesMes = state.movimentacoes
+    .filter((item) => item.data.slice(0, 7) === mes)
+    .sort((a, b) => new Date(a.data) - new Date(b.data));
+
+  const resumo = calcularResumo(movimentacoesMes);
+  const despesas = movimentacoesMes.filter((item) => item.tipo === "despesa");
+
+  return {
+    mes,
+    movimentacoesMes,
+    despesas,
+    totalReceitas: resumo.receitas,
+    totalDespesas: resumo.despesas,
+    saldo: resumo.receitas - resumo.despesas,
+  };
+}
+
+function escapeHtml(texto) {
+  return String(texto).replace(/[&<>"']/g, (char) => {
+    const mapa = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return mapa[char];
+  });
+}
+
+function montarHtmlRelatorio(relatorio) {
+  const linhas = relatorio.despesas
+    .map((item) => {
+      const data = new Date(item.data).toLocaleDateString("pt-BR");
+      return `<tr>
+        <td>${escapeHtml(data)}</td>
+        <td>${escapeHtml(item.categoria)}</td>
+        <td>${escapeHtml(item.descricao)}</td>
+        <td class="valor">${escapeHtml(formatarMoeda(item.valor))}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const corpoTabela = linhas
+    || '<tr><td colspan="4">Nenhum gasto encontrado para este mes.</td></tr>';
+
+  return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Relatorio mensal de gastos</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+      h1 { margin: 0 0 4px; font-size: 22px; }
+      p { margin: 4px 0; }
+      .muted { color: #4b5563; }
+      .resumo { margin: 18px 0; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; font-size: 13px; }
+      th { background: #f3f4f6; }
+      .valor { text-align: right; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Relatorio mensal de gastos</h1>
+    <p class="muted">Mes de referencia: ${escapeHtml(formatarMesReferencia(relatorio.mes))}</p>
+    <div class="resumo">
+      <p><strong>Total de receitas:</strong> ${escapeHtml(formatarMoeda(relatorio.totalReceitas))}</p>
+      <p><strong>Total de despesas:</strong> ${escapeHtml(formatarMoeda(relatorio.totalDespesas))}</p>
+      <p><strong>Saldo do mes:</strong> ${escapeHtml(formatarMoeda(relatorio.saldo))}</p>
+      <p><strong>Quantidade de gastos:</strong> ${escapeHtml(String(relatorio.despesas.length))}</p>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Categoria</th>
+          <th>Descricao</th>
+          <th>Valor</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${corpoTabela}
+      </tbody>
+    </table>
+  </body>
+</html>`;
+}
+
+function imprimirRelatorioMensal() {
+  const relatorio = construirDadosRelatorioMensal(obterMesRelatorio());
+
+  if (!relatorio.movimentacoesMes.length) {
+    toast("Nao ha movimentacoes para o mes selecionado");
+    return;
+  }
+
+  const janela = window.open("", "_blank", "width=900,height=700");
+  if (!janela) {
+    toast("Ative pop-up para imprimir o relatorio");
+    return;
+  }
+
+  janela.document.open();
+  janela.document.write(montarHtmlRelatorio(relatorio));
+  janela.document.close();
+  janela.focus();
+  janela.onload = () => janela.print();
+}
+
+function carregarJsPDF() {
+  if (window.jspdf?.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  if (jsPdfLoadPromise) return jsPdfLoadPromise;
+
+  jsPdfLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
+    script.onload = () => {
+      if (window.jspdf?.jsPDF) {
+        resolve(window.jspdf.jsPDF);
+        return;
+      }
+      reject(new Error("Biblioteca jsPDF indisponivel"));
+    };
+    script.onerror = () => reject(new Error("Falha ao carregar jsPDF"));
+    document.head.appendChild(script);
+  });
+
+  return jsPdfLoadPromise;
+}
+
+async function baixarRelatorioMensalPdf() {
+  const relatorio = construirDadosRelatorioMensal(obterMesRelatorio());
+
+  if (!relatorio.movimentacoesMes.length) {
+    toast("Nao ha movimentacoes para o mes selecionado");
+    return;
+  }
+
+  try {
+    const jsPDF = await carregarJsPDF();
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+    const paginaLargura = doc.internal.pageSize.getWidth();
+    const paginaAltura = doc.internal.pageSize.getHeight();
+    const margem = 40;
+    const areaUtil = paginaLargura - margem * 2;
+    let y = margem;
+
+    const garantirEspaco = (altura) => {
+      if (y + altura <= paginaAltura - margem) return;
+      doc.addPage();
+      y = margem;
+    };
+
+    const escreverBloco = (texto, fonte = "normal", tamanho = 11, gap = 16) => {
+      doc.setFont("helvetica", fonte);
+      doc.setFontSize(tamanho);
+      const linhas = doc.splitTextToSize(String(texto), areaUtil);
+      const altura = linhas.length * (tamanho + 3) * 0.75 + gap;
+      garantirEspaco(altura);
+      doc.text(linhas, margem, y);
+      y += linhas.length * (tamanho + 3) * 0.75 + gap;
+    };
+
+    escreverBloco("Relatorio mensal de gastos", "bold", 18, 10);
+    escreverBloco(`Mes de referencia: ${formatarMesReferencia(relatorio.mes)}`, "normal", 12, 12);
+    escreverBloco(`Total de receitas: ${formatarMoeda(relatorio.totalReceitas)}`, "normal", 11, 8);
+    escreverBloco(`Total de despesas: ${formatarMoeda(relatorio.totalDespesas)}`, "normal", 11, 8);
+    escreverBloco(`Saldo do mes: ${formatarMoeda(relatorio.saldo)}`, "normal", 11, 12);
+    escreverBloco(`Quantidade de gastos: ${relatorio.despesas.length}`, "normal", 11, 16);
+    escreverBloco("Detalhamento de gastos", "bold", 13, 12);
+
+    if (!relatorio.despesas.length) {
+      escreverBloco("Nenhum gasto encontrado para este mes.", "normal", 11, 8);
+    } else {
+      relatorio.despesas.forEach((item, index) => {
+        const data = new Date(item.data).toLocaleDateString("pt-BR");
+        escreverBloco(`${index + 1}. ${item.descricao}`, "bold", 11, 4);
+        escreverBloco(`Data: ${data} | Categoria: ${item.categoria}`, "normal", 10, 4);
+        escreverBloco(`Valor: ${formatarMoeda(item.valor)}`, "normal", 10, 10);
+      });
+    }
+
+    doc.save(`relatorio-gastos-${relatorio.mes}.pdf`);
+    toast("PDF gerado com sucesso");
+  } catch (error) {
+    toast("Nao foi possivel baixar PDF. Use Imprimir relatorio mensal");
+  }
 }
 
 function toast(msg) {
@@ -448,6 +657,13 @@ function bindEvents() {
 
   [els.filtroTipo, els.filtroCategoria, els.filtroMes].forEach((input) => {
     input.addEventListener("input", () => renderHistorico());
+  });
+
+  els.imprimirRelatorioBtn.addEventListener("click", () => imprimirRelatorioMensal());
+  els.baixarPdfBtn.addEventListener("click", () => {
+    baixarRelatorioMensalPdf().catch(() => {
+      toast("Erro ao gerar o PDF do relatorio");
+    });
   });
 
   els.metaMes.value = mesAtualISO();
