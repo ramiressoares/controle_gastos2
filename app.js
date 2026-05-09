@@ -22,6 +22,7 @@ const state = {
   editandoId: null,
   chart: null,
   deferredPrompt: null,
+  swRefreshing: false,
 };
 
 let jsPdfLoadPromise = null;
@@ -741,7 +742,43 @@ function configurarInstallPrompt() {
 
 function registrarServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {
+    navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+      const aplicarAtualizacao = (worker) => {
+        if (!worker) return;
+        worker.postMessage({ type: "SKIP_WAITING" });
+      };
+
+      if (registration.waiting) {
+        aplicarAtualizacao(registration.waiting);
+      }
+
+      registration.addEventListener("updatefound", () => {
+        const novoWorker = registration.installing;
+        if (!novoWorker) return;
+
+        novoWorker.addEventListener("statechange", () => {
+          if (novoWorker.state === "installed" && navigator.serviceWorker.controller) {
+            toast("Nova versao encontrada. Atualizando app...");
+            aplicarAtualizacao(novoWorker);
+          }
+        });
+      });
+
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (state.swRefreshing) return;
+        state.swRefreshing = true;
+        window.location.reload();
+      });
+
+      registration.update().catch(() => {});
+      setInterval(() => registration.update().catch(() => {}), 60 * 1000);
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          registration.update().catch(() => {});
+        }
+      });
+    }).catch(() => {
       toast("Nao foi possivel registrar o modo offline");
     });
   }

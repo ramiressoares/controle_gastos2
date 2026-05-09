@@ -1,4 +1,5 @@
-const CACHE_NAME = "controle-financeiro-v2";
+const CACHE_VERSION = "v3";
+const CACHE_NAME = `controle-financeiro-${CACHE_VERSION}`;
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -11,6 +12,41 @@ const CORE_ASSETS = [
   "./icons/app financeiro (1).png",
   "./icons/app financeiro (2).png",
 ];
+
+function isHtmlRequest(request) {
+  return request.mode === "navigate"
+    || request.headers.get("accept")?.includes("text/html");
+}
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(request, response.clone());
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    return caches.match("./index.html");
+  }
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+
+  const networkPromise = fetch(request)
+    .then((response) => {
+      cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => null);
+
+  return cached || networkPromise || new Response("Offline", {
+    status: 503,
+    statusText: "Offline",
+  });
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
@@ -30,28 +66,19 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
+  if (isHtmlRequest(event.request)) {
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
 
-      return fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return response;
-        })
-        .catch(() => {
-          if (event.request.mode === "navigate") {
-            return caches.match("./index.html");
-          }
-          return new Response("Offline", {
-            status: 503,
-            statusText: "Offline",
-          });
-        });
-    })
-  );
+  event.respondWith(staleWhileRevalidate(event.request));
 });
