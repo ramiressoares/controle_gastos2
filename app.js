@@ -5,6 +5,7 @@ import {
   excluirMovimentacao,
   initDB,
   listarMovimentacoesUsuario,
+  listarMetasUsuario,
   salvarMetaMensal,
 } from "./db.js";
 import {
@@ -17,6 +18,7 @@ import {
 const state = {
   usuario: null,
   movimentacoes: [],
+  metas: [],
   editandoId: null,
   chart: null,
   deferredPrompt: null,
@@ -56,6 +58,7 @@ const els = {
   metaStatus: document.getElementById("metaStatus"),
   metaResumo: document.getElementById("metaResumo"),
   metaProgress: document.getElementById("metaProgress"),
+  chartInsight: document.getElementById("chartInsight"),
   toast: document.getElementById("toast"),
   installBtn: document.getElementById("installBtn"),
   navButtons: [...document.querySelectorAll("[data-view]")],
@@ -440,37 +443,213 @@ function agruparPorMes() {
     }));
 }
 
+function formatarMesLabel(mesISO, incluirAno = false) {
+  if (!/^\d{4}-\d{2}$/.test(mesISO || "")) return mesISO || "-";
+
+  const [ano, mes] = mesISO.split("-").map(Number);
+  const nomeMes = new Date(ano, mes - 1, 1).toLocaleDateString("pt-BR", {
+    month: "long",
+  });
+  const mesCapitalizado = nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1);
+
+  return incluirAno ? `${mesCapitalizado}/${ano}` : mesCapitalizado;
+}
+
+function calcularMediaMovel(valores, janela = 3) {
+  return valores.map((_, indice) => {
+    const inicio = Math.max(0, indice - janela + 1);
+    const fatia = valores.slice(inicio, indice + 1);
+    if (fatia.length < janela) return null;
+
+    const soma = fatia.reduce((acc, valor) => acc + Number(valor || 0), 0);
+    return soma / janela;
+  });
+}
+
+function montarSerieMeta(serie) {
+  const metasPorMes = new Map(state.metas.map((meta) => [meta.mes, Number(meta.valor_meta)]));
+  return serie.map((item) => metasPorMes.get(item.mes) ?? null);
+}
+
+function atualizarInsightGrafico(serie, saldoData, mediaMovelData, metaData) {
+  if (!els.chartInsight) return;
+
+  if (!serie.length) {
+    els.chartInsight.textContent = "Adicione movimentacoes em mais de um mes para ver a evolucao.";
+    return;
+  }
+
+  const ultimoIndice = saldoData.length - 1;
+  const saldoAtual = Number(saldoData[ultimoIndice] || 0);
+  const saldoAnterior = ultimoIndice > 0 ? Number(saldoData[ultimoIndice - 1] || 0) : null;
+  const mediaAtual = mediaMovelData[ultimoIndice];
+  const mesesAcimaMeta = saldoData.reduce((acc, saldo, index) => {
+    const meta = metaData[index];
+    return acc + (meta != null && saldo > meta ? 1 : 0);
+  }, 0);
+
+  const partes = [];
+
+  if (saldoAnterior != null) {
+    if (saldoAtual > saldoAnterior) {
+      partes.push("Tendencia de alta no ultimo mes.");
+    } else if (saldoAtual < saldoAnterior) {
+      partes.push("Tendencia de queda no ultimo mes.");
+    } else {
+      partes.push("Saldo estavel no ultimo mes.");
+    }
+  }
+
+  if (mediaAtual != null) {
+    if (saldoAtual > mediaAtual) {
+      partes.push("O saldo atual esta acima da media movel.");
+    } else if (saldoAtual < mediaAtual) {
+      partes.push("O saldo atual esta abaixo da media movel.");
+    }
+  }
+
+  if (mesesAcimaMeta > 0) {
+    partes.push(`${mesesAcimaMeta} mes(es) acima da meta.`);
+  } else if (metaData.some((meta) => meta != null)) {
+    partes.push("Nenhum mes ultrapassou a meta registrada.");
+  }
+
+  els.chartInsight.textContent = partes.join(" ") || "Insira mais meses para acompanhar a tendencia.";
+}
+
 function renderChart() {
   const serie = agruparPorMes();
-  const labels = serie.map((i) => i.mes);
-  const saldoData = serie.map((i) => i.saldo);
 
   if (state.chart) {
     state.chart.destroy();
+    state.chart = null;
   }
 
   const canvas = document.getElementById("evolucaoChart");
   if (!canvas || typeof Chart === "undefined") return;
 
+  if (!serie.length) return;
+
+  const labels = serie.map((item, index) => {
+    const anoAnterior = index > 0 ? serie[index - 1].mes.slice(0, 4) : null;
+    const anoAtual = item.mes.slice(0, 4);
+    return formatarMesLabel(item.mes, index === 0 || anoAtual !== anoAnterior);
+  });
+
+  const saldoData = serie.map((i) => i.saldo);
+  const mediaMovelData = calcularMediaMovel(saldoData, 3);
+  const metaData = montarSerieMeta(serie);
+  const coresBarras = saldoData.map((saldo, index) => {
+    if (metaData[index] != null && saldo > metaData[index]) return "#ef4444";
+    if (index === 0) return "#0b1b52";
+    const saldoAnterior = saldoData[index - 1];
+    if (saldo > saldoAnterior) return "#0b1b52";
+    if (saldo < saldoAnterior) return "#9b1c31";
+    return "#334155";
+  });
+
   state.chart = new Chart(canvas, {
-    type: "line",
+    type: "bar",
     data: {
       labels,
       datasets: [
         {
           label: "Saldo mensal",
           data: saldoData,
-          borderColor: "#22c55e",
-          backgroundColor: "rgba(34,197,94,0.2)",
+          backgroundColor: coresBarras,
+          borderColor: "#0a1338",
+          borderWidth: 1,
+          borderRadius: 2,
+          maxBarThickness: 50,
+          order: 2,
+        },
+        {
+          label: "Média móvel 3 meses",
+          data: mediaMovelData,
+          type: "line",
+          borderColor: "#f59e0b",
+          backgroundColor: "rgba(245, 158, 11, 0.18)",
+          borderWidth: 2,
+          borderDash: [6, 4],
           tension: 0.32,
-          fill: true,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          pointBackgroundColor: "#f59e0b",
+          spanGaps: true,
+          fill: false,
+          order: 1,
+        },
+        {
+          label: "Meta mensal",
+          data: metaData,
+          type: "line",
+          borderColor: "#ef4444",
+          backgroundColor: "rgba(239, 68, 68, 0.12)",
+          borderWidth: 2,
+          borderDash: [4, 4],
+          tension: 0,
+          pointRadius: 0,
+          spanGaps: true,
+          fill: false,
+          order: 0,
         },
       ],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: "#e2e8f0" } },
+        legend: {
+          display: true,
+          labels: {
+            color: "#e2e8f0",
+            boxWidth: 12,
+            boxHeight: 12,
+            usePointStyle: true,
+            pointStyle: "rectRounded",
+            font: { size: 11 },
+          },
+        },
+        title: {
+          display: true,
+          text: "Evolucao de saldo nos meses",
+          color: "#e2e8f0",
+          font: { size: 15, weight: "bold" },
+          padding: { bottom: 12 },
+        },
+        tooltip: {
+          callbacks: {
+            title: (items) => `Mes: ${items[0].label}`,
+            label: (context) => {
+              const valorAtual = Number(context.raw || 0);
+              const idx = context.dataIndex;
+              if (context.dataset.label === "Meta mensal") {
+                return `Meta: ${formatarMoeda(valorAtual)}`;
+              }
+
+              if (context.dataset.label === "Média móvel 3 meses") {
+                return `Média móvel: ${formatarMoeda(valorAtual)}`;
+              }
+
+              if (idx === 0) {
+                return `Saldo: ${formatarMoeda(valorAtual)}`;
+              }
+
+              if (metaData[idx] != null && valorAtual > metaData[idx]) {
+                return `Acima da meta: ${formatarMoeda(valorAtual - metaData[idx])} | Saldo: ${formatarMoeda(
+                  valorAtual
+                )}`;
+              }
+
+              const valorAnterior = Number(saldoData[idx - 1]);
+              const variacao = valorAtual - valorAnterior;
+              const direcao = variacao > 0 ? "Alta" : variacao < 0 ? "Queda" : "Sem variacao";
+              return `${direcao}: ${formatarMoeda(Math.abs(variacao))} | Saldo: ${formatarMoeda(
+                valorAtual
+              )}`;
+            },
+          },
+        },
       },
       scales: {
         x: {
@@ -478,16 +657,23 @@ function renderChart() {
           grid: { color: "rgba(148,163,184,0.15)" },
         },
         y: {
-          ticks: { color: "#94a3b8" },
+          beginAtZero: true,
+          ticks: {
+            color: "#94a3b8",
+            callback: (value) => formatarMoeda(value),
+          },
           grid: { color: "rgba(148,163,184,0.15)" },
         },
       },
     },
   });
+
+  atualizarInsightGrafico(serie, saldoData, mediaMovelData, metaData);
 }
 
 async function atualizarTudo() {
   state.movimentacoes = await listarMovimentacoesUsuario(state.usuario.id);
+  state.metas = await listarMetasUsuario(state.usuario.id);
   renderDashboard();
   renderHistorico();
   await renderMeta();
@@ -686,7 +872,9 @@ function bindEvents() {
     });
 
     toast("Meta mensal salva");
+    state.metas = await listarMetasUsuario(state.usuario.id);
     await renderMeta();
+    renderChart();
   });
 }
 

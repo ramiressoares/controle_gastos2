@@ -197,3 +197,21 @@ export async function buscarMetaMensal(usuarioId, mes) {
     request.onerror = () => reject(request.error);
   });
 }
+
+export async function listarMetasUsuario(usuarioId) {
+  await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = dbInstance.transaction("metas", "readonly");
+    const store = tx.objectStore("metas");
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      const itens = (request.result || [])
+        .filter((meta) => meta.usuario_id === usuarioId)
+        .sort((a, b) => a.mes.localeCompare(b.mes));
+      resolve(itens);
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
