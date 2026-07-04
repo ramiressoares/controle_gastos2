@@ -233,6 +233,16 @@ async function gerarArquivoRelatorioPdf() {
 
   const resumo = calcularResumo(movimentacoes);
   const saldo = resumo.receitas - resumo.despesas;
+  const totalSelecionado = contexto.tipo === "receita"
+    ? resumo.receitas
+    : contexto.tipo === "despesa"
+      ? resumo.despesas
+      : resumo.receitas + resumo.despesas;
+  const rotuloTotalSelecionado = contexto.tipo === "receita"
+    ? "Total das Receitas"
+    : contexto.tipo === "despesa"
+      ? "Total das Despesas"
+      : "Total Geral";
   const jsPDF = await carregarJsPDF();
   const doc = new jsPDF({ unit: "pt", format: "a4" });
 
@@ -258,22 +268,32 @@ async function gerarArquivoRelatorioPdf() {
     y += linhas.length * (tamanho + 3) * 0.75 + gap;
   };
 
+  const desenharLinhaSeparadora = (espacoAntes = 10, espacoDepois = 14) => {
+    garantirEspaco(espacoAntes + espacoDepois + 6);
+    y += espacoAntes;
+    doc.setDrawColor(70, 85, 115);
+    doc.setLineWidth(1);
+    doc.line(margem, y, paginaLargura - margem, y);
+    y += espacoDepois;
+  };
+
   escreverBloco("Relatorio financeiro - Historico", "bold", 18, 10);
   escreverBloco(`Mes de referencia: ${contexto.mesLabel}`, "normal", 12, 8);
   escreverBloco(`Categoria: ${contexto.categoriaLabel}`, "normal", 11, 8);
   escreverBloco(`Tipo: ${contexto.tipoLabel}`, "normal", 11, 12);
-  escreverBloco(`Total de receitas: ${formatarMoeda(resumo.receitas)}`, "normal", 11, 8);
-  escreverBloco(`Total de despesas: ${formatarMoeda(resumo.despesas)}`, "normal", 11, 8);
-  escreverBloco(`Saldo da selecao: ${formatarMoeda(saldo)}`, "normal", 11, 8);
-  escreverBloco(`Quantidade de lancamentos exportados: ${movimentacoes.length}`, "normal", 11, 16);
-  escreverBloco("Movimentacoes exportadas", "bold", 13, 12);
+  escreverBloco(`${rotuloTotalSelecionado}: ${formatarMoeda(totalSelecionado)}`, "bold", 12, 10);
+
+  desenharLinhaSeparadora();
 
   movimentacoes.forEach((item, index) => {
     const data = new Date(item.data).toLocaleDateString("pt-BR");
     escreverBloco(`${index + 1}. ${item.descricao}`, "bold", 11, 4);
-    escreverBloco(`Data: ${data} | Tipo: ${formatarTipoFiltro(item.tipo)} | Categoria: ${item.categoria}`, "normal", 10, 4);
+    escreverBloco(`Data: ${data}`, "normal", 10, 4);
     escreverBloco(`Valor: ${formatarMoeda(item.valor)}`, "normal", 10, 10);
   });
+
+  desenharLinhaSeparadora(12, 12);
+  escreverBloco(`${rotuloTotalSelecionado}: ${formatarMoeda(totalSelecionado)}`, "bold", 13, 6);
 
   const mesArquivo = contexto.mes || "todos-os-meses";
   const fileName = `relatorio-historico-${mesArquivo}.pdf`;
