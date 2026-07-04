@@ -384,7 +384,7 @@ function filtrarMovimentacoes() {
   return state.movimentacoes.filter((item) => {
     const okTipo = tipo ? item.tipo === tipo : true;
     const okCategoria = categoria
-      ? normalizarTexto(item.categoria) === normalizarTexto(categoria)
+      ? normalizarTexto(item.categoria).includes(normalizarTexto(categoria))
       : true;
     const okMes = mes ? item.data.slice(0, 7) === mes : true;
     return okTipo && okCategoria && okMes;
@@ -392,24 +392,8 @@ function filtrarMovimentacoes() {
 }
 
 function atualizarFiltroCategorias() {
-  const categoriaSelecionada = els.filtroCategoria.value;
-  const categorias = obterCategoriasUsuario();
-
-  els.filtroCategoria.innerHTML = "";
-  const opcaoTodas = document.createElement("option");
-  opcaoTodas.value = "";
-  opcaoTodas.textContent = "Todas";
-  els.filtroCategoria.appendChild(opcaoTodas);
-
-  categorias.forEach((categoria) => {
-    const option = document.createElement("option");
-    option.value = categoria;
-    option.textContent = categoria;
-    els.filtroCategoria.appendChild(option);
-  });
-
-  if (categoriaSelecionada && categorias.includes(categoriaSelecionada)) {
-    els.filtroCategoria.value = categoriaSelecionada;
+  if (els.filtroCategoria && els.filtroCategoria.tagName === "INPUT") {
+    els.filtroCategoria.placeholder = "Escreva a categoria";
   }
 }
 
