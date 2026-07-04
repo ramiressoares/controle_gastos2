@@ -80,6 +80,14 @@
             <span class="chip-icon" aria-hidden="true">🎯</span>
             <span>Meta</span>
           </button>
+          <button class="chip" data-view="orcamentos" type="button" aria-label="Orcamentos">
+            <span class="chip-icon" aria-hidden="true">🗂️</span>
+            <span>Orcamentos</span>
+          </button>
+          <button class="chip" data-view="resumo" type="button" aria-label="Resumo financeiro">
+            <span class="chip-icon" aria-hidden="true">📈</span>
+            <span>Resumo</span>
+          </button>
         </div>
 
         <section id="view-dashboard" class="view card">
@@ -145,7 +153,9 @@
             </label>
             <label>
               Categoria
-              <input id="filtroCategoria" type="text" placeholder="Filtrar categoria" />
+              <select id="filtroCategoria">
+                <option value="">Todas</option>
+              </select>
             </label>
             <label>
               Mes
@@ -153,9 +163,10 @@
             </label>
           </div>
           <div class="report-actions">
-            <button id="imprimirRelatorioBtn" class="btn ghost" type="button">Imprimir relatorio mensal</button>
             <button id="baixarPdfBtn" class="btn primary" type="button">Baixar PDF mensal</button>
+            <button id="enviarWhatsappBtn" class="btn ghost" type="button">Enviar pelo WhatsApp</button>
           </div>
+          <article id="resumoHistoricoCard" class="report-summary-card muted"></article>
           <ul id="historicoLista" class="mov-list"></ul>
         </section>
 
@@ -183,6 +194,55 @@
             <h4>Evolucao mensal</h4>
             <canvas id="evolucaoChart" height="180"></canvas>
             <p id="chartInsight" class="chart-insight muted">O gráfico será atualizado conforme houver dados mensais.</p>
+          </div>
+        </section>
+
+        <section id="view-orcamentos" class="view card hidden">
+          <h3>Orcamentos</h3>
+          <form id="orcamentoForm" class="grid-form">
+            <label>
+              Mes referencia
+              <input id="orcamentoMes" type="month" required />
+            </label>
+            <label>
+              Categoria
+              <input id="orcamentoCategoria" list="orcamentoCategoriasList" type="text" required maxlength="40" placeholder="Ex: Mercado" />
+              <datalist id="orcamentoCategoriasList"></datalist>
+            </label>
+            <label>
+              Valor do orcamento
+              <input id="orcamentoValor" type="number" min="0.01" step="0.01" required />
+            </label>
+            <button id="orcamentoSubmitBtn" class="btn primary" type="submit">Salvar orcamento</button>
+            <button id="cancelOrcamentoEditBtn" class="btn ghost hidden" type="button">Cancelar edicao</button>
+          </form>
+          <ul id="orcamentosLista" class="mov-list"></ul>
+        </section>
+
+        <section id="view-resumo" class="view card hidden">
+          <h3>Resumo Financeiro</h3>
+          <div class="filters resumo-filtros">
+            <label>
+              Mes de referencia
+              <input id="resumoMes" type="month" />
+            </label>
+          </div>
+          <div id="resumoCards" class="stats-grid resumo-grid"></div>
+          <article class="resumo-top5-wrap">
+            <h4>Cinco maiores gastos do mes</h4>
+            <ol id="resumoTop5" class="resumo-top5"></ol>
+          </article>
+          <div class="chart-wrap">
+            <h4>Pizza de gastos por categoria</h4>
+            <canvas id="resumoPizzaChart" height="180"></canvas>
+          </div>
+          <div class="chart-wrap">
+            <h4>Receitas x despesas</h4>
+            <canvas id="resumoBarrasChart" height="180"></canvas>
+          </div>
+          <div class="chart-wrap">
+            <h4>Evolucao dos ultimos 12 meses</h4>
+            <canvas id="resumoEvolucaoChart" height="180"></canvas>
           </div>
         </section>
       </section>

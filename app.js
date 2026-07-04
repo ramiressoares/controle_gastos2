@@ -19,13 +19,22 @@ const state = {
   usuario: null,
   movimentacoes: [],
   metas: [],
+  orcamentos: [],
+  historicoFiltradoAtual: [],
   editandoId: null,
+  orcamentoEditandoId: null,
   chart: null,
+  resumoCharts: {
+    pizza: null,
+    barras: null,
+    evolucao: null,
+  },
   deferredPrompt: null,
   swRefreshing: false,
 };
 
 let jsPdfLoadPromise = null;
+const ORCAMENTOS_STORAGE_PREFIX = "cf_orcamentos_usuario_";
 
 const els = {
   authSection: document.getElementById("authSection"),
@@ -51,8 +60,9 @@ const els = {
   filtroTipo: document.getElementById("filtroTipo"),
   filtroCategoria: document.getElementById("filtroCategoria"),
   filtroMes: document.getElementById("filtroMes"),
-  imprimirRelatorioBtn: document.getElementById("imprimirRelatorioBtn"),
   baixarPdfBtn: document.getElementById("baixarPdfBtn"),
+  enviarWhatsappBtn: document.getElementById("enviarWhatsappBtn"),
+  resumoHistoricoCard: document.getElementById("resumoHistoricoCard"),
   metaForm: document.getElementById("metaForm"),
   metaMes: document.getElementById("metaMes"),
   metaValor: document.getElementById("metaValor"),
@@ -60,6 +70,20 @@ const els = {
   metaResumo: document.getElementById("metaResumo"),
   metaProgress: document.getElementById("metaProgress"),
   chartInsight: document.getElementById("chartInsight"),
+  orcamentoForm: document.getElementById("orcamentoForm"),
+  orcamentoMes: document.getElementById("orcamentoMes"),
+  orcamentoCategoria: document.getElementById("orcamentoCategoria"),
+  orcamentoValor: document.getElementById("orcamentoValor"),
+  orcamentoSubmitBtn: document.getElementById("orcamentoSubmitBtn"),
+  cancelOrcamentoEditBtn: document.getElementById("cancelOrcamentoEditBtn"),
+  orcamentosLista: document.getElementById("orcamentosLista"),
+  orcamentoCategoriasList: document.getElementById("orcamentoCategoriasList"),
+  resumoMes: document.getElementById("resumoMes"),
+  resumoCards: document.getElementById("resumoCards"),
+  resumoTop5: document.getElementById("resumoTop5"),
+  resumoPizzaChart: document.getElementById("resumoPizzaChart"),
+  resumoBarrasChart: document.getElementById("resumoBarrasChart"),
+  resumoEvolucaoChart: document.getElementById("resumoEvolucaoChart"),
   toast: document.getElementById("toast"),
   installBtn: document.getElementById("installBtn"),
   navButtons: [...document.querySelectorAll("[data-view]")],
@@ -68,6 +92,8 @@ const els = {
     nova: document.getElementById("view-nova"),
     historico: document.getElementById("view-historico"),
     meta: document.getElementById("view-meta"),
+    orcamentos: document.getElementById("view-orcamentos"),
+    resumo: document.getElementById("view-resumo"),
   },
 };
 
@@ -93,119 +119,61 @@ function formatarMesReferencia(mesISO) {
   });
 }
 
-function obterMesRelatorio() {
-  return els.filtroMes.value || mesAtualISO();
+function normalizarTexto(texto) {
+  return String(texto || "").trim().toLowerCase();
 }
 
-function construirDadosRelatorioMensal(mes) {
-  const movimentacoesMes = state.movimentacoes
-    .filter((item) => item.data.slice(0, 7) === mes)
-    .sort((a, b) => new Date(a.data) - new Date(b.data));
+function obterMesAnterior(mesISO) {
+  if (!/^\d{4}-\d{2}$/.test(mesISO || "")) return mesAtualISO();
+  const [ano, mes] = mesISO.split("-").map(Number);
+  const data = new Date(ano, mes - 1, 1);
+  data.setMonth(data.getMonth() - 1);
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}`;
+}
 
-  const resumo = calcularResumo(movimentacoesMes);
-  const despesas = movimentacoesMes.filter((item) => item.tipo === "despesa");
+function obterChaveOrcamentosUsuario(usuarioId) {
+  return `${ORCAMENTOS_STORAGE_PREFIX}${usuarioId}`;
+}
+
+function carregarOrcamentosUsuario(usuarioId) {
+  try {
+    const salvo = localStorage.getItem(obterChaveOrcamentosUsuario(usuarioId));
+    const itens = JSON.parse(salvo || "[]");
+    if (!Array.isArray(itens)) return [];
+    return itens.sort((a, b) => `${a.mes}-${a.categoria}`.localeCompare(`${b.mes}-${b.categoria}`));
+  } catch {
+    return [];
+  }
+}
+
+function salvarOrcamentosUsuario(usuarioId, orcamentos) {
+  localStorage.setItem(obterChaveOrcamentosUsuario(usuarioId), JSON.stringify(orcamentos));
+}
+
+function obterCategoriasUsuario() {
+  return [...new Set(state.movimentacoes.map((item) => item.categoria.trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+}
+
+function formatarTipoFiltro(tipo) {
+  if (tipo === "receita") return "Receita";
+  if (tipo === "despesa") return "Despesa";
+  return "Todos";
+}
+
+function obterContextoFiltrosHistorico() {
+  const tipo = els.filtroTipo.value;
+  const categoria = els.filtroCategoria.value;
+  const mes = els.filtroMes.value;
 
   return {
+    tipo,
+    categoria,
     mes,
-    movimentacoesMes,
-    despesas,
-    totalReceitas: resumo.receitas,
-    totalDespesas: resumo.despesas,
-    saldo: resumo.receitas - resumo.despesas,
+    tipoLabel: formatarTipoFiltro(tipo),
+    categoriaLabel: categoria || "Todas",
+    mesLabel: mes ? formatarMesReferencia(mes) : "Todos os meses",
   };
-}
-
-function escapeHtml(texto) {
-  return String(texto).replace(/[&<>"']/g, (char) => {
-    const mapa = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    };
-    return mapa[char];
-  });
-}
-
-function montarHtmlRelatorio(relatorio) {
-  const linhas = relatorio.despesas
-    .map((item) => {
-      const data = new Date(item.data).toLocaleDateString("pt-BR");
-      return `<tr>
-        <td>${escapeHtml(data)}</td>
-        <td>${escapeHtml(item.categoria)}</td>
-        <td>${escapeHtml(item.descricao)}</td>
-        <td class="valor">${escapeHtml(formatarMoeda(item.valor))}</td>
-      </tr>`;
-    })
-    .join("");
-
-  const corpoTabela = linhas
-    || '<tr><td colspan="4">Nenhum gasto encontrado para este mes.</td></tr>';
-
-  return `<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Relatorio mensal de gastos</title>
-    <style>
-      body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
-      h1 { margin: 0 0 4px; font-size: 22px; }
-      p { margin: 4px 0; }
-      .muted { color: #4b5563; }
-      .resumo { margin: 18px 0; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-      th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; font-size: 13px; }
-      th { background: #f3f4f6; }
-      .valor { text-align: right; white-space: nowrap; }
-    </style>
-  </head>
-  <body>
-    <h1>Relatorio mensal de gastos</h1>
-    <p class="muted">Mes de referencia: ${escapeHtml(formatarMesReferencia(relatorio.mes))}</p>
-    <div class="resumo">
-      <p><strong>Total de receitas:</strong> ${escapeHtml(formatarMoeda(relatorio.totalReceitas))}</p>
-      <p><strong>Total de despesas:</strong> ${escapeHtml(formatarMoeda(relatorio.totalDespesas))}</p>
-      <p><strong>Saldo do mes:</strong> ${escapeHtml(formatarMoeda(relatorio.saldo))}</p>
-      <p><strong>Quantidade de gastos:</strong> ${escapeHtml(String(relatorio.despesas.length))}</p>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Data</th>
-          <th>Categoria</th>
-          <th>Descricao</th>
-          <th>Valor</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${corpoTabela}
-      </tbody>
-    </table>
-  </body>
-</html>`;
-}
-
-function imprimirRelatorioMensal() {
-  const relatorio = construirDadosRelatorioMensal(obterMesRelatorio());
-
-  if (!relatorio.movimentacoesMes.length) {
-    toast("Nao ha movimentacoes para o mes selecionado");
-    return;
-  }
-
-  const janela = window.open("", "_blank", "width=900,height=700");
-  if (!janela) {
-    toast("Ative pop-up para imprimir o relatorio");
-    return;
-  }
-
-  janela.document.open();
-  janela.document.write(montarHtmlRelatorio(relatorio));
-  janela.document.close();
-  janela.focus();
-  janela.onload = () => janela.print();
 }
 
 function carregarJsPDF() {
@@ -230,62 +198,121 @@ function carregarJsPDF() {
 }
 
 async function baixarRelatorioMensalPdf() {
-  const relatorio = construirDadosRelatorioMensal(obterMesRelatorio());
-
-  if (!relatorio.movimentacoesMes.length) {
-    toast("Nao ha movimentacoes para o mes selecionado");
-    return;
-  }
-
   try {
-    const jsPDF = await carregarJsPDF();
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const arquivoPdf = await gerarArquivoRelatorioPdf();
+    if (!arquivoPdf) return;
 
-    const paginaLargura = doc.internal.pageSize.getWidth();
-    const paginaAltura = doc.internal.pageSize.getHeight();
-    const margem = 40;
-    const areaUtil = paginaLargura - margem * 2;
-    let y = margem;
-
-    const garantirEspaco = (altura) => {
-      if (y + altura <= paginaAltura - margem) return;
-      doc.addPage();
-      y = margem;
-    };
-
-    const escreverBloco = (texto, fonte = "normal", tamanho = 11, gap = 16) => {
-      doc.setFont("helvetica", fonte);
-      doc.setFontSize(tamanho);
-      const linhas = doc.splitTextToSize(String(texto), areaUtil);
-      const altura = linhas.length * (tamanho + 3) * 0.75 + gap;
-      garantirEspaco(altura);
-      doc.text(linhas, margem, y);
-      y += linhas.length * (tamanho + 3) * 0.75 + gap;
-    };
-
-    escreverBloco("Relatorio mensal de gastos", "bold", 18, 10);
-    escreverBloco(`Mes de referencia: ${formatarMesReferencia(relatorio.mes)}`, "normal", 12, 12);
-    escreverBloco(`Total de receitas: ${formatarMoeda(relatorio.totalReceitas)}`, "normal", 11, 8);
-    escreverBloco(`Total de despesas: ${formatarMoeda(relatorio.totalDespesas)}`, "normal", 11, 8);
-    escreverBloco(`Saldo do mes: ${formatarMoeda(relatorio.saldo)}`, "normal", 11, 12);
-    escreverBloco(`Quantidade de gastos: ${relatorio.despesas.length}`, "normal", 11, 16);
-    escreverBloco("Detalhamento de gastos", "bold", 13, 12);
-
-    if (!relatorio.despesas.length) {
-      escreverBloco("Nenhum gasto encontrado para este mes.", "normal", 11, 8);
-    } else {
-      relatorio.despesas.forEach((item, index) => {
-        const data = new Date(item.data).toLocaleDateString("pt-BR");
-        escreverBloco(`${index + 1}. ${item.descricao}`, "bold", 11, 4);
-        escreverBloco(`Data: ${data} | Categoria: ${item.categoria}`, "normal", 10, 4);
-        escreverBloco(`Valor: ${formatarMoeda(item.valor)}`, "normal", 10, 10);
-      });
-    }
-
-    doc.save(`relatorio-gastos-${relatorio.mes}.pdf`);
+    baixarBlobPdf(arquivoPdf.blob, arquivoPdf.fileName);
     toast("PDF gerado com sucesso");
   } catch (error) {
-    toast("Nao foi possivel baixar PDF. Use Imprimir relatorio mensal");
+    toast("Nao foi possivel baixar PDF");
+  }
+}
+
+function baixarBlobPdf(blob, fileName) {
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
+async function gerarArquivoRelatorioPdf() {
+  renderHistorico();
+
+  const contexto = obterContextoFiltrosHistorico();
+  const movimentacoes = [...state.historicoFiltradoAtual];
+
+  if (!movimentacoes.length) {
+    toast("Nao ha movimentacoes para os filtros selecionados");
+    return null;
+  }
+
+  const resumo = calcularResumo(movimentacoes);
+  const saldo = resumo.receitas - resumo.despesas;
+  const jsPDF = await carregarJsPDF();
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+  const paginaLargura = doc.internal.pageSize.getWidth();
+  const paginaAltura = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const areaUtil = paginaLargura - margem * 2;
+  let y = margem;
+
+  const garantirEspaco = (altura) => {
+    if (y + altura <= paginaAltura - margem) return;
+    doc.addPage();
+    y = margem;
+  };
+
+  const escreverBloco = (texto, fonte = "normal", tamanho = 11, gap = 16) => {
+    doc.setFont("helvetica", fonte);
+    doc.setFontSize(tamanho);
+    const linhas = doc.splitTextToSize(String(texto), areaUtil);
+    const altura = linhas.length * (tamanho + 3) * 0.75 + gap;
+    garantirEspaco(altura);
+    doc.text(linhas, margem, y);
+    y += linhas.length * (tamanho + 3) * 0.75 + gap;
+  };
+
+  escreverBloco("Relatorio financeiro - Historico", "bold", 18, 10);
+  escreverBloco(`Mes de referencia: ${contexto.mesLabel}`, "normal", 12, 8);
+  escreverBloco(`Categoria: ${contexto.categoriaLabel}`, "normal", 11, 8);
+  escreverBloco(`Tipo: ${contexto.tipoLabel}`, "normal", 11, 12);
+  escreverBloco(`Total de receitas: ${formatarMoeda(resumo.receitas)}`, "normal", 11, 8);
+  escreverBloco(`Total de despesas: ${formatarMoeda(resumo.despesas)}`, "normal", 11, 8);
+  escreverBloco(`Saldo da selecao: ${formatarMoeda(saldo)}`, "normal", 11, 8);
+  escreverBloco(`Quantidade de lancamentos exportados: ${movimentacoes.length}`, "normal", 11, 16);
+  escreverBloco("Movimentacoes exportadas", "bold", 13, 12);
+
+  movimentacoes.forEach((item, index) => {
+    const data = new Date(item.data).toLocaleDateString("pt-BR");
+    escreverBloco(`${index + 1}. ${item.descricao}`, "bold", 11, 4);
+    escreverBloco(`Data: ${data} | Tipo: ${formatarTipoFiltro(item.tipo)} | Categoria: ${item.categoria}`, "normal", 10, 4);
+    escreverBloco(`Valor: ${formatarMoeda(item.valor)}`, "normal", 10, 10);
+  });
+
+  const mesArquivo = contexto.mes || "todos-os-meses";
+  const fileName = `relatorio-historico-${mesArquivo}.pdf`;
+  const blob = doc.output("blob");
+  const file = new File([blob], fileName, { type: "application/pdf" });
+
+  return { file, blob, fileName, contexto };
+}
+
+async function enviarRelatorioWhatsapp() {
+  try {
+    const arquivoPdf = await gerarArquivoRelatorioPdf();
+    if (!arquivoPdf) return;
+
+    const texto = `Relatorio financeiro (${arquivoPdf.contexto.mesLabel} - ${arquivoPdf.contexto.categoriaLabel}).`;
+    const suportaShareArquivos =
+      typeof navigator !== "undefined"
+      && typeof navigator.share === "function"
+      && typeof navigator.canShare === "function"
+      && navigator.canShare({ files: [arquivoPdf.file] });
+
+    if (suportaShareArquivos) {
+      await navigator.share({
+        title: "Relatorio financeiro",
+        text: texto,
+        files: [arquivoPdf.file],
+      });
+      toast("Relatorio compartilhado com sucesso");
+      return;
+    }
+
+    baixarBlobPdf(arquivoPdf.blob, arquivoPdf.fileName);
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(`${texto} Escolha um contato e anexe o PDF baixado automaticamente.`)}`,
+      "_blank"
+    );
+    toast("WhatsApp aberto. Escolha um contato e anexe o PDF");
+  } catch (error) {
+    toast("Nao foi possivel enviar pelo WhatsApp");
   }
 }
 
@@ -305,13 +332,16 @@ function alternarAuthTela(tipo) {
 
 function mostrarAppLogado(usuario) {
   state.usuario = usuario;
+  state.orcamentos = carregarOrcamentosUsuario(usuario.id);
   els.userName.textContent = usuario.nome;
   els.authSection.classList.add("hidden");
   els.appSection.classList.remove("hidden");
 }
 
 function mostrarAuth() {
+  Object.keys(state.resumoCharts).forEach((chave) => destruirChartResumo(chave));
   state.usuario = null;
+  state.orcamentos = [];
   els.authSection.classList.remove("hidden");
   els.appSection.classList.add("hidden");
 }
@@ -349,18 +379,47 @@ function renderDashboard() {
 }
 
 function filtrarMovimentacoes() {
-  const tipo = els.filtroTipo.value;
-  const categoria = els.filtroCategoria.value.trim().toLowerCase();
-  const mes = els.filtroMes.value;
+  const { tipo, categoria, mes } = obterContextoFiltrosHistorico();
 
   return state.movimentacoes.filter((item) => {
     const okTipo = tipo ? item.tipo === tipo : true;
     const okCategoria = categoria
-      ? item.categoria.toLowerCase().includes(categoria)
+      ? normalizarTexto(item.categoria) === normalizarTexto(categoria)
       : true;
     const okMes = mes ? item.data.slice(0, 7) === mes : true;
     return okTipo && okCategoria && okMes;
   });
+}
+
+function atualizarFiltroCategorias() {
+  const categoriaSelecionada = els.filtroCategoria.value;
+  const categorias = obterCategoriasUsuario();
+
+  els.filtroCategoria.innerHTML = "";
+  const opcaoTodas = document.createElement("option");
+  opcaoTodas.value = "";
+  opcaoTodas.textContent = "Todas";
+  els.filtroCategoria.appendChild(opcaoTodas);
+
+  categorias.forEach((categoria) => {
+    const option = document.createElement("option");
+    option.value = categoria;
+    option.textContent = categoria;
+    els.filtroCategoria.appendChild(option);
+  });
+
+  if (categoriaSelecionada && categorias.includes(categoriaSelecionada)) {
+    els.filtroCategoria.value = categoriaSelecionada;
+  }
+}
+
+function atualizarResumoHistoricoCard(itens) {
+  const resumo = calcularResumo(itens);
+  const saldo = resumo.receitas - resumo.despesas;
+  const categoriaSelecionada = els.filtroCategoria.value;
+  const titulo = categoriaSelecionada ? "Total da categoria:" : "Total geral do mes:";
+
+  els.resumoHistoricoCard.innerHTML = `<p>${titulo} <strong>${formatarMoeda(saldo)}</strong></p>`;
 }
 
 function montarLinhaMov(item) {
@@ -382,12 +441,369 @@ function montarLinhaMov(item) {
 
 function renderHistorico() {
   const itens = filtrarMovimentacoes();
+  state.historicoFiltradoAtual = itens;
+  atualizarResumoHistoricoCard(itens);
+
   if (!itens.length) {
     els.historicoLista.innerHTML = "<li class=\"muted\">Nenhuma movimentacao encontrada.</li>";
     return;
   }
 
   els.historicoLista.innerHTML = itens.map(montarLinhaMov).join("");
+}
+
+function atualizarDatalistCategoriasOrcamento() {
+  const categorias = obterCategoriasUsuario();
+  els.orcamentoCategoriasList.innerHTML = categorias
+    .map((categoria) => `<option value="${categoria}"></option>`)
+    .join("");
+}
+
+function obterGastoCategoriaMes(categoria, mes) {
+  return state.movimentacoes
+    .filter(
+      (item) => item.tipo === "despesa"
+        && item.data.slice(0, 7) === mes
+        && normalizarTexto(item.categoria) === normalizarTexto(categoria)
+    )
+    .reduce((acc, item) => acc + Number(item.valor), 0);
+}
+
+function obterStatusOrcamento(percentual) {
+  if (percentual <= 70) return { classe: "ok", cor: "#22c55e", label: "No limite" };
+  if (percentual <= 100) return { classe: "warn", cor: "#f59e0b", label: "Atencao" };
+  return { classe: "bad", cor: "#ef4444", label: "Acima do orcamento" };
+}
+
+function limparFormularioOrcamento() {
+  state.orcamentoEditandoId = null;
+  els.orcamentoForm.reset();
+  els.orcamentoMes.value = mesAtualISO();
+  els.orcamentoSubmitBtn.textContent = "Salvar orcamento";
+  els.cancelOrcamentoEditBtn.classList.add("hidden");
+}
+
+function preencherOrcamentoParaEdicao(orcamento) {
+  state.orcamentoEditandoId = orcamento.id;
+  els.orcamentoMes.value = orcamento.mes;
+  els.orcamentoCategoria.value = orcamento.categoria;
+  els.orcamentoValor.value = orcamento.valor;
+  els.orcamentoSubmitBtn.textContent = "Atualizar orcamento";
+  els.cancelOrcamentoEditBtn.classList.remove("hidden");
+}
+
+function montarLinhaOrcamento(orcamento) {
+  const gasto = obterGastoCategoriaMes(orcamento.categoria, orcamento.mes);
+  const limite = Number(orcamento.valor || 0);
+  const percentual = limite > 0 ? (gasto / limite) * 100 : 0;
+  const percentualBarra = Math.min(percentual, 100);
+  const restante = limite - gasto;
+  const status = obterStatusOrcamento(percentual);
+
+  return `<li class="orcamento-item" data-id="${orcamento.id}">
+    <div class="orcamento-head">
+      <strong>${orcamento.categoria} • ${formatarMesReferencia(orcamento.mes)}</strong>
+      <span class="orcamento-status ${status.classe}">${status.label}</span>
+    </div>
+    <small class="muted">Orcamento: ${formatarMoeda(limite)} | Gasto: ${formatarMoeda(gasto)} | Restante: ${formatarMoeda(restante)}</small>
+    <div class="progress-wrap orcamento">
+      <div class="progress-bar orcamento" style="width:${percentualBarra.toFixed(2)}%; background:${status.cor};"></div>
+    </div>
+    <small class="muted">Consumo: ${percentual.toFixed(1)}%</small>
+    <div class="mov-actions">
+      <button class="btn ghost" data-action="editar" type="button">Editar</button>
+      <button class="btn danger" data-action="excluir" type="button">Excluir</button>
+    </div>
+  </li>`;
+}
+
+function renderOrcamentos() {
+  atualizarDatalistCategoriasOrcamento();
+
+  if (!state.orcamentos.length) {
+    els.orcamentosLista.innerHTML = "<li class=\"muted\">Nenhum orcamento cadastrado.</li>";
+    return;
+  }
+
+  const itens = [...state.orcamentos].sort((a, b) => `${a.mes}-${a.categoria}`.localeCompare(`${b.mes}-${b.categoria}`));
+  els.orcamentosLista.innerHTML = itens.map(montarLinhaOrcamento).join("");
+}
+
+async function tratarOrcamentoSubmit(event) {
+  event.preventDefault();
+
+  const mes = els.orcamentoMes.value;
+  const categoria = els.orcamentoCategoria.value.trim();
+  const valor = Number(els.orcamentoValor.value);
+
+  if (!mes || !categoria || !(valor > 0)) {
+    toast("Preencha os dados do orcamento corretamente");
+    return;
+  }
+
+  const usuarioId = state.usuario.id;
+  const id = state.orcamentoEditandoId || `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  const outros = state.orcamentos.filter((item) => item.id !== id);
+
+  const conflito = outros.some(
+    (item) => item.mes === mes && normalizarTexto(item.categoria) === normalizarTexto(categoria)
+  );
+
+  if (conflito) {
+    toast("Ja existe orcamento para esta categoria no mes informado");
+    return;
+  }
+
+  const atualizado = {
+    id,
+    usuario_id: usuarioId,
+    mes,
+    categoria,
+    valor,
+    criado_em: new Date().toISOString(),
+  };
+
+  state.orcamentos = [...outros, atualizado];
+  salvarOrcamentosUsuario(usuarioId, state.orcamentos);
+  limparFormularioOrcamento();
+  renderOrcamentos();
+  toast("Orcamento salvo com sucesso");
+}
+
+function tratarOrcamentosClick(event) {
+  const btn = event.target.closest("button[data-action]");
+  if (!btn) return;
+
+  const li = event.target.closest("li[data-id]");
+  if (!li) return;
+
+  const id = li.dataset.id;
+  const orcamento = state.orcamentos.find((item) => item.id === id);
+  if (!orcamento) return;
+
+  if (btn.dataset.action === "editar") {
+    preencherOrcamentoParaEdicao(orcamento);
+    return;
+  }
+
+  if (btn.dataset.action === "excluir") {
+    const ok = confirm("Deseja excluir este orcamento?");
+    if (!ok) return;
+
+    state.orcamentos = state.orcamentos.filter((item) => item.id !== id);
+    salvarOrcamentosUsuario(state.usuario.id, state.orcamentos);
+    if (state.orcamentoEditandoId === id) limparFormularioOrcamento();
+    renderOrcamentos();
+    toast("Orcamento excluido");
+  }
+}
+
+function calcularResumoFinanceiroMes(mes) {
+  const mesAnterior = obterMesAnterior(mes);
+  const movMes = state.movimentacoes.filter((item) => item.data.slice(0, 7) === mes);
+  const movMesAnterior = state.movimentacoes.filter((item) => item.data.slice(0, 7) === mesAnterior);
+
+  const receitasMes = movMes.filter((item) => item.tipo === "receita");
+  const despesasMes = movMes.filter((item) => item.tipo === "despesa");
+  const totalReceitas = receitasMes.reduce((acc, item) => acc + Number(item.valor), 0);
+  const totalDespesas = despesasMes.reduce((acc, item) => acc + Number(item.valor), 0);
+  const saldoMes = totalReceitas - totalDespesas;
+
+  const categoriaGastos = new Map();
+  despesasMes.forEach((item) => {
+    categoriaGastos.set(item.categoria, (categoriaGastos.get(item.categoria) || 0) + Number(item.valor));
+  });
+
+  const maiorCategoria = [...categoriaGastos.entries()].sort((a, b) => b[1] - a[1])[0] || ["-", 0];
+  const despesasOrdenadas = [...despesasMes].sort((a, b) => Number(b.valor) - Number(a.valor));
+  const menorDespesa = despesasOrdenadas.length
+    ? Number(despesasOrdenadas[despesasOrdenadas.length - 1].valor)
+    : 0;
+  const maiorDespesa = despesasOrdenadas.length ? Number(despesasOrdenadas[0].valor) : 0;
+
+  const [ano, numeroMes] = mes.split("-").map(Number);
+  const diasNoMes = new Date(ano, numeroMes, 0).getDate();
+  const mediaDiariaGastos = diasNoMes ? totalDespesas / diasNoMes : 0;
+
+  const totalAno = state.movimentacoes
+    .filter((item) => item.data.startsWith(`${ano}-`))
+    .reduce((acc, item) => (item.tipo === "receita" ? acc + Number(item.valor) : acc - Number(item.valor)), 0);
+
+  const resumoAnterior = calcularResumo(movMesAnterior);
+  const saldoAnterior = resumoAnterior.receitas - resumoAnterior.despesas;
+
+  return {
+    mes,
+    mesAnterior,
+    movMes,
+    receitasMes,
+    despesasMes,
+    totalReceitas,
+    totalDespesas,
+    saldoMes,
+    qtdReceitas: receitasMes.length,
+    qtdDespesas: despesasMes.length,
+    maiorCategoria: maiorCategoria[0],
+    valorMaiorCategoria: maiorCategoria[1],
+    mediaDiariaGastos,
+    maiorDespesa,
+    menorDespesa,
+    top5: despesasOrdenadas.slice(0, 5),
+    comparativo: {
+      totalReceitasAnterior: resumoAnterior.receitas,
+      totalDespesasAnterior: resumoAnterior.despesas,
+      saldoAnterior,
+      variacaoSaldo: saldoMes - saldoAnterior,
+    },
+    totalEconomizadoAno: totalAno,
+    categoriaGastos,
+  };
+}
+
+function montarCardResumo(titulo, valor) {
+  return `<article class="stat"><p>${titulo}</p><strong>${valor}</strong></article>`;
+}
+
+function renderResumoCards(resumo) {
+  const variacaoLabel = `${formatarMoeda(resumo.comparativo.variacaoSaldo)} vs ${formatarMesReferencia(
+    resumo.mesAnterior
+  )}`;
+
+  els.resumoCards.innerHTML = [
+    montarCardResumo("Receita do mes", formatarMoeda(resumo.totalReceitas)),
+    montarCardResumo("Despesas do mes", formatarMoeda(resumo.totalDespesas)),
+    montarCardResumo("Saldo do mes", formatarMoeda(resumo.saldoMes)),
+    montarCardResumo("Quantidade de receitas", String(resumo.qtdReceitas)),
+    montarCardResumo("Quantidade de despesas", String(resumo.qtdDespesas)),
+    montarCardResumo("Categoria com maior gasto", resumo.maiorCategoria),
+    montarCardResumo("Valor da maior categoria", formatarMoeda(resumo.valorMaiorCategoria)),
+    montarCardResumo("Media diaria de gastos", formatarMoeda(resumo.mediaDiariaGastos)),
+    montarCardResumo("Maior despesa", formatarMoeda(resumo.maiorDespesa)),
+    montarCardResumo("Menor despesa", formatarMoeda(resumo.menorDespesa)),
+    montarCardResumo("Comparativo com mes anterior", variacaoLabel),
+    montarCardResumo("Total economizado no ano", formatarMoeda(resumo.totalEconomizadoAno)),
+  ].join("");
+}
+
+function renderResumoTop5(resumo) {
+  if (!resumo.top5.length) {
+    els.resumoTop5.innerHTML = '<li class="muted">Sem despesas no mes selecionado.</li>';
+    return;
+  }
+
+  els.resumoTop5.innerHTML = resumo.top5
+    .map((item) => `<li>${item.descricao} (${item.categoria}) - <strong>${formatarMoeda(item.valor)}</strong></li>`)
+    .join("");
+}
+
+function destruirChartResumo(chave) {
+  const chart = state.resumoCharts[chave];
+  if (chart) {
+    chart.destroy();
+    state.resumoCharts[chave] = null;
+  }
+}
+
+function renderResumoGraficos(resumo) {
+  if (typeof Chart === "undefined") return;
+
+  destruirChartResumo("pizza");
+  destruirChartResumo("barras");
+  destruirChartResumo("evolucao");
+
+  const pizzaLabels = [...resumo.categoriaGastos.keys()];
+  const pizzaValores = [...resumo.categoriaGastos.values()];
+
+  state.resumoCharts.pizza = new Chart(els.resumoPizzaChart, {
+    type: "pie",
+    data: {
+      labels: pizzaLabels.length ? pizzaLabels : ["Sem despesas"],
+      datasets: [
+        {
+          data: pizzaValores.length ? pizzaValores : [1],
+          backgroundColor: ["#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"],
+          borderColor: "#081128",
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        legend: { labels: { color: "#e2e8f0" } },
+      },
+    },
+  });
+
+  state.resumoCharts.barras = new Chart(els.resumoBarrasChart, {
+    type: "bar",
+    data: {
+      labels: ["Receitas", "Despesas"],
+      datasets: [
+        {
+          label: formatarMesReferencia(resumo.mes),
+          data: [resumo.totalReceitas, resumo.totalDespesas],
+          backgroundColor: ["#22c55e", "#ef4444"],
+        },
+        {
+          label: formatarMesReferencia(resumo.mesAnterior),
+          data: [resumo.comparativo.totalReceitasAnterior, resumo.comparativo.totalDespesasAnterior],
+          backgroundColor: ["#16a34a", "#b91c1c"],
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        legend: { labels: { color: "#e2e8f0" } },
+      },
+      scales: {
+        x: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,0.15)" } },
+        y: {
+          ticks: { color: "#94a3b8", callback: (value) => formatarMoeda(value) },
+          grid: { color: "rgba(148,163,184,0.15)" },
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+
+  const serie12 = agruparPorMes().slice(-12);
+  state.resumoCharts.evolucao = new Chart(els.resumoEvolucaoChart, {
+    type: "line",
+    data: {
+      labels: serie12.map((item) => formatarMesLabel(item.mes, true)),
+      datasets: [
+        {
+          label: "Saldo mensal",
+          data: serie12.map((item) => item.saldo),
+          borderColor: "#38bdf8",
+          backgroundColor: "rgba(56, 189, 248, 0.22)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: 2,
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        legend: { labels: { color: "#e2e8f0" } },
+      },
+      scales: {
+        x: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,0.15)" } },
+        y: {
+          ticks: { color: "#94a3b8", callback: (value) => formatarMoeda(value) },
+          grid: { color: "rgba(148,163,184,0.15)" },
+        },
+      },
+    },
+  });
+}
+
+function renderResumoFinanceiro() {
+  const mes = els.resumoMes.value || mesAtualISO();
+  const resumo = calcularResumoFinanceiroMes(mes);
+  renderResumoCards(resumo);
+  renderResumoTop5(resumo);
+  renderResumoGraficos(resumo);
 }
 
 async function renderMeta() {
@@ -675,8 +1091,13 @@ function renderChart() {
 async function atualizarTudo() {
   state.movimentacoes = await listarMovimentacoesUsuario(state.usuario.id);
   state.metas = await listarMetasUsuario(state.usuario.id);
+  state.orcamentos = carregarOrcamentosUsuario(state.usuario.id);
+  atualizarFiltroCategorias();
+  atualizarDatalistCategoriasOrcamento();
   renderDashboard();
   renderHistorico();
+  renderOrcamentos();
+  renderResumoFinanceiro();
   await renderMeta();
   renderChart();
 }
@@ -834,6 +1255,12 @@ function bindEvents() {
       if (btn.dataset.view === "meta") {
         await renderMeta();
       }
+      if (btn.dataset.view === "orcamentos") {
+        renderOrcamentos();
+      }
+      if (btn.dataset.view === "resumo") {
+        renderResumoFinanceiro();
+      }
     });
   });
 
@@ -874,20 +1301,44 @@ function bindEvents() {
 
   els.cancelEditBtn.addEventListener("click", () => limparFormularioMov());
 
+  els.orcamentoForm.addEventListener("submit", (event) => {
+    tratarOrcamentoSubmit(event).catch(() => {
+      toast("Nao foi possivel salvar o orcamento");
+    });
+  });
+
+  els.cancelOrcamentoEditBtn.addEventListener("click", () => limparFormularioOrcamento());
+
+  els.orcamentosLista.addEventListener("click", (event) => {
+    tratarOrcamentosClick(event);
+  });
+
   els.historicoLista.addEventListener("click", (event) => {
     tratarHistoricoClick(event).catch(() => toast("Erro ao processar acao"));
   });
 
   [els.filtroTipo, els.filtroCategoria, els.filtroMes].forEach((input) => {
     input.addEventListener("input", () => renderHistorico());
+    input.addEventListener("change", () => renderHistorico());
   });
 
-  els.imprimirRelatorioBtn.addEventListener("click", () => imprimirRelatorioMensal());
   els.baixarPdfBtn.addEventListener("click", () => {
     baixarRelatorioMensalPdf().catch(() => {
       toast("Erro ao gerar o PDF do relatorio");
     });
   });
+  els.enviarWhatsappBtn.addEventListener("click", () => {
+    enviarRelatorioWhatsapp().catch(() => {
+      toast("Erro ao enviar relatorio para o WhatsApp");
+    });
+  });
+
+  els.filtroMes.value = mesAtualISO();
+  els.orcamentoMes.value = mesAtualISO();
+  els.resumoMes.value = mesAtualISO();
+
+  els.resumoMes.addEventListener("input", () => renderResumoFinanceiro());
+  els.resumoMes.addEventListener("change", () => renderResumoFinanceiro());
 
   els.metaMes.value = mesAtualISO();
 
